@@ -256,6 +256,10 @@ class ParallelRunner(Runner):
             self.output.print_no_features_found(self.loader.base_dir)
             return
 
+        manager = multiprocessing.Manager()
+        errors = manager.list()
+        results = manager.list()
+
         failed = False
         scenarios_to_run = []
         try:
@@ -268,48 +272,47 @@ class ParallelRunner(Runner):
             sys.stderr.write(e.msg)
             failed = True
 
-        batches = grouper(self.workers, scenarios_to_run)
+        scenarios_to_run.reverse()
 
-        import pdb; pdb.set_trace()
+        scenario_queue = multiprocessing.Queue()
+        for s in scenarios_to_run:
+            scenario_queue.put(s)
 
         call_hook('before', 'all')
 
         ignore_case = True
 
-        manager = multiprocessing.Manager()
-        errors = manager.list()
-        results = manager.list()
-
-        def process_batch(batch,port_number,results,errors):
+        def process_scenarios(scenario_queue,port_number,results,errors):
             print "running batch with port number: {}".format(port_number)
             world.port_number = port_number
 
-            call_hook('before','batch')
+            call_hook('before', 'batch')
 
-            try:
-                for scenario in batch:
-                    results.append(scenario.run(ignore_case, failfast=self.failfast))
-            except Exception as e:
-                if not self.failfast:
-                    e = sys.exc_info()[1]
-                    print "Died with %s" % str(e)
-                    traceback.print_exc()
-                    errors.append(e)
-                else:
-                    print
-                    print ("Lettuce aborted running any more tests "
-                           "because was called with the `--failfast` option")
+            while not scenario_queue.empty():
 
-                failed = True
+                scenario_to_execute = scenario_queue.get()
+
+                try:
+                    results.append(scenario_to_execute.run(ignore_case, failfast=self.failfast))
+                except Exception as e:
+                    if not self.failfast:
+                        e = sys.exc_info()[1]
+                        print "Died with %s" % str(e)
+                        traceback.print_exc()
+                        errors.append(e)
+                    else:
+                        print
+                        print ("Lettuce aborted running any more tests "
+                               "because was called with the `--failfast` option")
+
 
             call_hook('after','batch')
 
+        # TODO use pool
         processes = []
-        i = 0
-        for batch in batches:
-            i = i + 1
+        for i in xrange(self.workers):
             port_number = 8180 + i
-            process = multiprocessing.Process(target=process_batch,args=(batch,port_number,results,errors))
+            process = multiprocessing.Process(target=process_scenarios,args=(scenario_queue,port_number,results,errors))
             processes.append(process)
             process.start()
 
