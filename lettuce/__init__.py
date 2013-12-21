@@ -205,12 +205,33 @@ class Runner(object):
 
 def grouper(n, iterable):
     # http://stackoverflow.com/a/1625013/192791
-    args = [iter(iterable)] * n
-    return ([e for e in t if e != None] for t in itertools.izip_longest(*args))
+    # args = [iter(iterable)] * n
+    # return ([e for e in t if e != None] for t in itertools.izip_longest(*args))
+    # http://www.garyrobinson.net/2008/04/splitting-a-pyt.html
+    return [iterable[i::n] for i in range(n)]
+
 
 
 class ParallelRunner(Runner):
 
+    def __init__(self, base_path, scenarios=None, verbosity=0, random=False,
+                 enable_xunit=False, xunit_filename=None,
+                 enable_subunit=False, subunit_filename=None,
+                 tags=None, failfast=False, auto_pdb=False,
+                 smtp_queue=None,workers=None):
+
+        super(ParallelRunner, self).__init__( base_path,
+                                              scenarios=scenarios,
+                                              verbosity=verbosity,
+                                              random=random,
+                                              enable_xunit=enable_xunit,
+                                              xunit_filename=xunit_filename,
+                                              enable_subunit=enable_subunit,
+                                              subunit_filename=subunit_filename,
+                                              failfast=failfast,
+                                              auto_pdb=auto_pdb,
+                                              tags=tags)
+        self.workers = workers
 
 
     def run(self):
@@ -247,9 +268,9 @@ class ParallelRunner(Runner):
             sys.stderr.write(e.msg)
             failed = True
 
+        batches = grouper(self.workers, scenarios_to_run)
 
-        number_of_workers = 3
-        batches = grouper(number_of_workers, scenarios_to_run)
+        import pdb; pdb.set_trace()
 
         call_hook('before', 'all')
 

@@ -55,8 +55,7 @@ def main(args=sys.argv[1:]):
 
     parser.add_option("-p", "--parallel",
                       dest="parallel",
-                      action="store_true",
-                      default=False,
+                      default=None,
                       help="Run scenarios in a parallel fashion")
 
     parser.add_option("--with-xunit",
@@ -110,7 +109,7 @@ def main(args=sys.argv[1:]):
         tags = [tag.strip('@') for tag in options.tags]
 
     if options.parallel:
-        print "running Parallel Runner"
+        print "running Parallel Runner with {} workers".format(options.parallel)
         runner = lettuce.ParallelRunner(
             base_path,
             scenarios=options.scenarios,
@@ -122,7 +121,8 @@ def main(args=sys.argv[1:]):
             subunit_filename=options.subunit_filename,
             failfast=options.failfast,
             auto_pdb=options.auto_pdb,
-            tags=tags
+            tags=tags,
+            workers=int(options.parallel)
         )
     else:
         runner = lettuce.Runner(
