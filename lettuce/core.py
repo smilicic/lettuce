@@ -1170,12 +1170,7 @@ class Feature(object):
 
         return background, scenarios, description
 
-    def run(self, scenarios=None, ignore_case=True, tags=None, random=False, failfast=False):
-        scenarios_ran = []
-
-        if random:
-            shuffle(self.scenarios)
-
+    def scenarios_to_run(self,scenarios,tags):
         scenario_nums_to_run = None
         if isinstance(scenarios, (tuple, list)):
             if all(map(lambda x: isinstance(x, int), scenarios)):
@@ -1184,8 +1179,19 @@ class Feature(object):
         def should_run_scenario(num, scenario):
             return scenario.matches_tags(tags) and \
                    (scenario_nums_to_run is None or num in scenario_nums_to_run)
-        scenarios_to_run = [scenario for num, scenario in enumerate(self.scenarios, start=1)
-                                     if should_run_scenario(num, scenario)]
+        return [scenario for num, scenario in enumerate(self.scenarios, start=1)
+                            if should_run_scenario(num, scenario)]
+
+
+
+    def run(self, scenarios=None, ignore_case=True, tags=None, random=False, failfast=False):
+        scenarios_ran = []
+
+        if random:
+            shuffle(self.scenarios)
+
+        scenarios_to_run = self.scenarios_to_run(self.scenarios,tags)
+
         # If no scenarios in this feature will run, don't run the feature hooks.
         if not scenarios_to_run:
             return FeatureResult(self)
@@ -1247,6 +1253,7 @@ class TotalResult(object):
         self.failed_scenario_locations = []
         for feature_result in self.feature_results:
             for scenario_result in feature_result.scenario_results:
+
                 self.scenario_results.append(scenario_result)
                 self.steps_passed += len(scenario_result.steps_passed)
                 self.steps_failed += len(scenario_result.steps_failed)

@@ -22,6 +22,10 @@ release = 'kryptonite'
 import os
 import sys
 import traceback
+
+import multiprocessing
+
+
 try:
     from imp import reload
 except ImportError:
@@ -29,8 +33,9 @@ except ImportError:
     pass
 
 import random
+import itertools
 
-from lettuce.core import Feature, TotalResult
+from lettuce.core import Feature, TotalResult, FeatureResult
 
 from lettuce.terrain import after
 from lettuce.terrain import before
@@ -97,7 +102,6 @@ class Runner(object):
         """ lettuce.Runner will try to find a terrain.py file and
         import it from within `base_path`
         """
-
         self.tags = tags
         self.single_feature = None
 
@@ -197,3 +201,124 @@ class Runner(object):
                 raise SystemExit(2)
 
             return total
+
+
+def grouper(n, iterable):
+    # http://stackoverflow.com/a/1625013/192791
+    args = [iter(iterable)] * n
+    return ([e for e in t if e != None] for t in itertools.izip_longest(*args))
+
+
+class ParallelRunner(Runner):
+
+
+
+    def run(self):
+        """ Find and load step definitions, and them find and load
+        features under `base_path` specified on constructor
+        """
+        try:
+            print "look at me!"
+            self.loader.find_and_load_step_definitions()
+        except StepLoadingError, e:
+            print "Error loading step definitions:\n", e
+            return
+
+        if self.single_feature:
+            features_files = [self.single_feature]
+        else:
+            features_files = self.loader.find_feature_files()
+            if self.random:
+                random.shuffle(features_files)
+
+        if not features_files:
+            self.output.print_no_features_found(self.loader.base_dir)
+            return
+
+        failed = False
+        scenarios_to_run = []
+        try:
+
+            for filename in features_files:
+                feature = Feature.from_file(filename)
+                feature_scenarios_to_run = feature.scenarios_to_run(self.scenarios,self.tags)
+                scenarios_to_run.extend(feature_scenarios_to_run)
+        except exceptions.LettuceSyntaxError, e:
+            sys.stderr.write(e.msg)
+            failed = True
+
+
+        number_of_workers = 3
+        batches = grouper(number_of_workers, scenarios_to_run)
+
+        call_hook('before', 'all')
+
+        ignore_case = True
+
+        manager = multiprocessing.Manager()
+        errors = manager.list()
+        results = manager.list()
+
+        def process_batch(batch,port_number,results,errors):
+            print "running batch with port number: {}".format(port_number)
+            world.port_number = port_number
+
+            call_hook('before','batch')
+
+            try:
+                for scenario in batch:
+                    results.append(scenario.run(ignore_case, failfast=self.failfast))
+            except Exception as e:
+                if not self.failfast:
+                    e = sys.exc_info()[1]
+                    print "Died with %s" % str(e)
+                    traceback.print_exc()
+                    errors.append(e)
+                else:
+                    print
+                    print ("Lettuce aborted running any more tests "
+                           "because was called with the `--failfast` option")
+
+                failed = True
+
+            call_hook('after','batch')
+
+        processes = []
+        i = 0
+        for batch in batches:
+            i = i + 1
+            port_number = 8180 + i
+            process = multiprocessing.Process(target=process_batch,args=(batch,port_number,results,errors))
+            processes.append(process)
+            process.start()
+
+        for process in processes:
+            process.join()
+
+        if len(errors) > 0:
+            print "Exceptions"
+            for error in errors:
+                print error
+        else:
+            print "Test suite had no errors"
+
+        feature_results = []
+
+        for feature, scenario_results in itertools.groupby(results, lambda r: r[0].scenario.feature):
+            all_results = []
+            for results in scenario_results:
+                for result in results:
+                    all_results.append(result)
+
+            feature_results.append(FeatureResult(feature, *list(all_results)))
+
+        total = TotalResult(feature_results)
+
+        call_hook('after', 'all', total)
+
+        if failed:
+            raise SystemExit(2)
+
+        return total
+
+

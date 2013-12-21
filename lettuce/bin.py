@@ -53,6 +53,12 @@ def main(args=sys.argv[1:]):
                       default=False,
                       help="Run scenarios in a more random order to avoid interference")
 
+    parser.add_option("-p", "--parallel",
+                      dest="parallel",
+                      action="store_true",
+                      default=False,
+                      help="Run scenarios in a parallel fashion")
+
     parser.add_option("--with-xunit",
                       dest="enable_xunit",
                       action="store_true",
@@ -103,19 +109,35 @@ def main(args=sys.argv[1:]):
     if options.tags:
         tags = [tag.strip('@') for tag in options.tags]
 
-    runner = lettuce.Runner(
-        base_path,
-        scenarios=options.scenarios,
-        verbosity=options.verbosity,
-        random=options.random,
-        enable_xunit=options.enable_xunit,
-        xunit_filename=options.xunit_file,
-        enable_subunit=options.enable_subunit,
-        subunit_filename=options.subunit_filename,
-        failfast=options.failfast,
-        auto_pdb=options.auto_pdb,
-        tags=tags,
-    )
+    if options.parallel:
+        print "running Parallel Runner"
+        runner = lettuce.ParallelRunner(
+            base_path,
+            scenarios=options.scenarios,
+            verbosity=options.verbosity,
+            random=options.random,
+            enable_xunit=options.enable_xunit,
+            xunit_filename=options.xunit_file,
+            enable_subunit=options.enable_subunit,
+            subunit_filename=options.subunit_filename,
+            failfast=options.failfast,
+            auto_pdb=options.auto_pdb,
+            tags=tags
+        )
+    else:
+        runner = lettuce.Runner(
+            base_path,
+            scenarios=options.scenarios,
+            verbosity=options.verbosity,
+            random=options.random,
+            enable_xunit=options.enable_xunit,
+            xunit_filename=options.xunit_file,
+            enable_subunit=options.enable_subunit,
+            subunit_filename=options.subunit_filename,
+            failfast=options.failfast,
+            auto_pdb=options.auto_pdb,
+            tags=tags
+        )
 
     result = runner.run()
     failed = result is None or result.steps != result.steps_passed

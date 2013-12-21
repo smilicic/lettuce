@@ -90,6 +90,10 @@ CALLBACK_REGISTRY = CallbackDict(
             'before': [],
             'after': [],
         },
+        'batch': {
+            'before': [],
+            'after': [],
+        },
         'step': {
             'before_each': [],
             'after_each': [],

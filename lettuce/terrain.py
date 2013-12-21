@@ -58,6 +58,7 @@ for name, where, when in (
         ('each_background', 'background', '%(0)s_each'),
         ('each_feature', 'feature', '%(0)s_each'),
         ('harvest', 'harvest', '%(0)s'),
+        ('batch', 'batch', '%(0)s'),
         ('each_app', 'app', '%(0)s_each'),
         ('runserver', 'runserver', '%(0)s'),
         ('handle_request', 'handle_request', '%(0)s'),
