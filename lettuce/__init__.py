@@ -270,8 +270,6 @@ class ParallelRunner(Runner):
 
         batches = grouper(self.workers, scenarios_to_run)
 
-        import pdb; pdb.set_trace()
-
         call_hook('before', 'all')
 
         ignore_case = True
@@ -288,7 +286,21 @@ class ParallelRunner(Runner):
 
             try:
                 for scenario in batch:
-                    results.append(scenario.run(ignore_case, failfast=self.failfast))
+                    result = scenario.run(ignore_case, failfast=self.failfast)
+
+                    import pickle
+                    failed = False
+                    try:
+                        pickle.dumps(result)
+                    except Exception as e:
+                        print "Failed: [{}]".format(e)
+                        traceback.print_exc()
+                        failed = True
+
+                    if failed:
+                        print "!!!!! Failed to pickle: {}".format(scenario.name)
+
+                    results.append(result)
             except Exception as e:
                 if not self.failfast:
                     e = sys.exc_info()[1]
