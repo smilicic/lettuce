@@ -278,6 +278,7 @@ class ParallelRunner(Runner):
         for s in scenarios_to_run:
             scenario_queue.put(s)
 
+
         call_hook('before', 'all')
 
         ignore_case = True
@@ -293,7 +294,21 @@ class ParallelRunner(Runner):
                 scenario_to_execute = scenario_queue.get()
 
                 try:
-                    results.append(scenario_to_execute.run(ignore_case, failfast=self.failfast))
+                    result = scenario_to_execute.run(ignore_case, failfast=self.failfast)
+
+                    import pickle
+                    failed = False
+                    try:
+                        pickle.dumps(result)
+                    except Exception as e:
+                        print "Failed: [{}]".format(e)
+                        traceback.print_exc()
+                        failed = True
+
+                    if failed:
+                        print "!!!!! Failed to pickle: {}".format(scenario_to_execute.name)
+
+                    results.append(result)
                 except Exception as e:
                     if not self.failfast:
                         e = sys.exc_info()[1]
@@ -304,7 +319,6 @@ class ParallelRunner(Runner):
                         print
                         print ("Lettuce aborted running any more tests "
                                "because was called with the `--failfast` option")
-
 
             call_hook('after','batch')
 
