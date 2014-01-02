@@ -22,9 +22,9 @@ release = 'kryptonite'
 import os
 import sys
 import traceback
-
 import multiprocessing
 
+from datetime import datetime
 
 try:
     from imp import reload
@@ -203,15 +203,6 @@ class Runner(object):
             return total
 
 
-def grouper(n, iterable):
-    # http://stackoverflow.com/a/1625013/192791
-    # args = [iter(iterable)] * n
-    # return ([e for e in t if e != None] for t in itertools.izip_longest(*args))
-    # http://www.garyrobinson.net/2008/04/splitting-a-pyt.html
-    return [iterable[i::n] for i in range(n)]
-
-
-
 class ParallelRunner(Runner):
 
     def __init__(self, base_path, scenarios=None, verbosity=0, random=False,
@@ -238,6 +229,7 @@ class ParallelRunner(Runner):
         """ Find and load step definitions, and them find and load
         features under `base_path` specified on constructor
         """
+        begin_time = datetime.utcnow()
         try:
             print "look at me!"
             self.loader.find_and_load_step_definitions()
@@ -350,7 +342,9 @@ class ParallelRunner(Runner):
 
             feature_results.append(FeatureResult(feature, *list(all_results)))
 
-        total = TotalResult(feature_results)
+        time_elapsed = datetime.utcnow() - begin_time
+
+        total = TotalResult(feature_results, time_elapsed)
 
         call_hook('after', 'all', total)
 

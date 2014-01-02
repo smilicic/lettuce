@@ -21,6 +21,7 @@ import codecs
 import unicodedata
 
 from copy import deepcopy
+from datetime import datetime
 from fuzzywuzzy import fuzz
 from itertools import chain
 from random import shuffle
@@ -702,6 +703,8 @@ class Scenario(object):
         call_hook('before_each', 'scenario', self)
 
         def run_scenario(almost_self, order=-1, outline=None, run_callbacks=False):
+
+            scenario_begin_time = datetime.utcnow()
             try:
                 if self.background:
                     self.background.run(ignore_case)
@@ -719,12 +722,15 @@ class Scenario(object):
             skip = lambda x: x not in steps_passed and x not in steps_undefined and x not in steps_failed
             steps_skipped = filter(skip, all_steps)
 
+            elapsed_time = datetime.utcnow() - scenario_begin_time
+
             return ScenarioResult(
                 self,
                 steps_passed,
                 steps_failed,
                 steps_skipped,
-                steps_undefined
+                steps_undefined,
+                elapsed_time
             )
 
         if self.outlines:
@@ -1222,7 +1228,7 @@ class FeatureResult(object):
 class ScenarioResult(object):
     """Object that holds results of each step ran from within a scenario"""
     def __init__(self, scenario, steps_passed, steps_failed, steps_skipped,
-                 steps_undefined):
+                 steps_undefined, time_elapsed=None):
 
         self.scenario = scenario
 
@@ -1230,6 +1236,7 @@ class ScenarioResult(object):
         self.steps_failed = steps_failed
         self.steps_skipped = steps_skipped
         self.steps_undefined = steps_undefined
+        self.time_elapsed = time_elapsed
 
         all_lists = [steps_passed + steps_skipped + steps_undefined + steps_failed]
         self.total_steps = sum(map(len, all_lists))
@@ -1240,7 +1247,7 @@ class ScenarioResult(object):
 
 
 class TotalResult(object):
-    def __init__(self, feature_results):
+    def __init__(self, feature_results, time_elapsed):
         self.feature_results = feature_results
         self.scenario_results = []
         self.steps_passed = 0
@@ -1251,6 +1258,7 @@ class TotalResult(object):
         self.steps = 0
         # store the scenario names that failed, with their location
         self.failed_scenario_locations = []
+        self.time_elapsed = time_elapsed
         for feature_result in self.feature_results:
             for scenario_result in feature_result.scenario_results:
 
