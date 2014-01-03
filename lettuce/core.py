@@ -17,6 +17,7 @@
 
 
 import re
+import csv
 import codecs
 import unicodedata
 
@@ -1298,3 +1299,17 @@ class TotalResult(object):
     @property
     def scenarios_passed(self):
         return len([result for result in self.scenario_results if result.passed])
+
+    def persist_to_csv(self):
+
+        #note that with 'w' we will overwrite the file
+        with open('.scenarios.csv', 'w') as f:
+            writer = csv.writer(f)
+            writer.writerow(['name','duration','passed'])
+            for feature_result in self.feature_results:
+                for scenario_result in feature_result.scenario_results:
+                    # print scenario_result.scenario.name, scenario_result.time_elapsed.seconds, scenario_result.passed
+                    writer.writerow([scenario_result.scenario.name, scenario_result.time_elapsed.seconds, scenario_result.passed])
+
+
+

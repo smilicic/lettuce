@@ -20,6 +20,8 @@ __version__ = version = '0.2.19'
 release = 'kryptonite'
 
 import os
+import csv
+import os.path
 import sys
 import traceback
 import multiprocessing
@@ -269,7 +271,25 @@ class ParallelRunner(Runner):
             sys.stderr.write(e.msg)
             failed = True
 
-        scenarios_to_run.reverse()
+
+        # sort scenarios in slowest to fastest by looking at the last run time if existed
+        if os.path.isfile('.scenarios.csv'):
+            scenario_metas = csv.DictReader(open(".scenarios.csv"))
+            name_duration_dict = dict()
+            for scenario_meta in scenario_metas:
+                name_duration_dict[scenario_meta['name']] = scenario_meta['duration']
+
+            scenario_duration_dict = dict()
+            for scenario in scenarios_to_run:
+                if scenario.name in name_duration_dict:
+                    scenario_duration_dict[scenario] = name_duration_dict[scenario.name]
+                else:
+                    scenario_duration_dict[scenario] = 0
+
+            # now sort them:
+            sorted_tupples = sorted(scenario_duration_dict.items(), key=lambda x: -int(x[1]))
+            scenarios_to_run = [tupple[0] for tupple in sorted_tupples]
+
 
         scenario_queue = multiprocessing.Queue()
         for s in scenarios_to_run:
@@ -349,6 +369,7 @@ class ParallelRunner(Runner):
         time_elapsed = datetime.utcnow() - begin_time
 
         total = TotalResult(feature_results, time_elapsed)
+        total.persist_to_csv()
 
         call_hook('after', 'all', total)
 
