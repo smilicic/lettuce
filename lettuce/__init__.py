@@ -166,7 +166,11 @@ class Runner(object):
             self.output.print_no_features_found(self.loader.base_dir)
             return
 
+        world.port_number = 8181
         call_hook('before', 'all')
+        call_hook('before', 'batch')
+        begin_time = datetime.utcnow()
+
 
         failed = False
         try:
@@ -194,7 +198,9 @@ class Runner(object):
             failed = True
 
         finally:
-            total = TotalResult(results)
+            total_time = datetime.utcnow() - begin_time
+            total = TotalResult(results, total_time)
+            call_hook('after', 'batch')
             call_hook('after', 'all', total)
 
             if failed:
@@ -231,7 +237,6 @@ class ParallelRunner(Runner):
         """
         begin_time = datetime.utcnow()
         try:
-            print "look at me!"
             self.loader.find_and_load_step_definitions()
         except StepLoadingError, e:
             print "Error loading step definitions:\n", e
@@ -276,16 +281,15 @@ class ParallelRunner(Runner):
         ignore_case = True
 
         def process_scenarios(scenario_queue,port_number,results,errors):
-            print "running batch with port number: {}".format(port_number)
+            #print "running batch with port number: {}".format(port_number)
             world.port_number = port_number
 
             call_hook('before', 'batch')
 
             while not scenario_queue.empty():
 
-                scenario_to_execute = scenario_queue.get()
-
                 try:
+                    scenario_to_execute = scenario_queue.get()
                     result = scenario_to_execute.run(ignore_case, failfast=self.failfast)
 
                     import pickle
