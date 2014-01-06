@@ -23,6 +23,7 @@ import os
 import csv
 import os.path
 import sys
+import signal
 import traceback
 import multiprocessing
 
@@ -230,7 +231,10 @@ class ParallelRunner(Runner):
                                               failfast=failfast,
                                               auto_pdb=auto_pdb,
                                               tags=tags)
+
+
         self.workers = workers
+
 
 
     def run(self):
@@ -325,6 +329,7 @@ class ParallelRunner(Runner):
                         print "!!!!! Failed to pickle: {}".format(scenario_to_execute.name)
 
                     results.append(result)
+
                 except Exception as e:
                     if not self.failfast:
                         e = sys.exc_info()[1]
@@ -346,8 +351,18 @@ class ParallelRunner(Runner):
             processes.append(process)
             process.start()
 
-        for process in processes:
-            process.join()
+        try:
+            for process in processes:
+                process.join()
+        except (KeyboardInterrupt, SystemExit):
+            print "Ctr-C processed shutting down"
+            for process in processes:
+                process.terminate()
+                process.join()
+
+            print "trying to exit!"
+            sys.exit(0)
+
 
         if len(errors) > 0:
             print "Exceptions"
@@ -356,26 +371,26 @@ class ParallelRunner(Runner):
         else:
             print "Test suite had no errors"
 
-        feature_results = []
+            feature_results = []
 
-        for feature, scenario_results in itertools.groupby(results, lambda r: r[0].scenario.feature):
-            all_results = []
-            for results in scenario_results:
-                for result in results:
-                    all_results.append(result)
+            for feature, scenario_results in itertools.groupby(results, lambda r: r[0].scenario.feature):
+                all_results = []
+                for results in scenario_results:
+                    for result in results:
+                        all_results.append(result)
 
-            feature_results.append(FeatureResult(feature, *list(all_results)))
+                feature_results.append(FeatureResult(feature, *list(all_results)))
 
-        time_elapsed = datetime.utcnow() - begin_time
+            time_elapsed = datetime.utcnow() - begin_time
 
-        total = TotalResult(feature_results, time_elapsed)
-        total.persist_to_csv()
+            total = TotalResult(feature_results, time_elapsed)
+            total.persist_to_csv()
 
-        call_hook('after', 'all', total)
+            call_hook('after', 'all', total)
 
-        if failed:
-            raise SystemExit(2)
+            if failed:
+                raise SystemExit(2)
 
-        return total
+            return total
 
 
