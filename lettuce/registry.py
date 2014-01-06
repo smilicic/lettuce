@@ -21,7 +21,10 @@ import traceback
 
 from lettuce.exceptions import StepLoadingError
 
-world = threading.local()
+
+class World(object): pass
+
+world = World()
 world._set = False
 
 
