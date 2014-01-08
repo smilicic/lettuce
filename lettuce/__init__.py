@@ -355,13 +355,11 @@ class ParallelRunner(Runner):
             for process in processes:
                 process.join()
         except (KeyboardInterrupt, SystemExit):
+            # TODO: This is really not working for me.  Have been using Ctr-\ to break out
             print "Ctr-C processed shutting down"
             for process in processes:
                 process.terminate()
                 process.join()
-
-            print "trying to exit!"
-            sys.exit(0)
 
 
         if len(errors) > 0:
