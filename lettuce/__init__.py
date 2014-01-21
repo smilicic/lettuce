@@ -21,11 +21,11 @@ release = 'kryptonite'
 
 import os
 import csv
-import os.path
 import sys
 import signal
 import traceback
 import multiprocessing
+from multiprocessing.managers import SyncManager
 
 from datetime import datetime
 
@@ -53,8 +53,14 @@ from lettuce.plugins import (
     xunit_output,
     subunit_output,
     autopdb,
-    smtp_mail_queue,
 )
+
+try:
+    from lettuce.plugins import smtp_mail_queue
+except ImportError:
+    # I really do not want to have to have django installed
+    pass
+
 from lettuce import fs
 from lettuce import exceptions
 
@@ -236,11 +242,42 @@ class ParallelRunner(Runner):
         self.workers = workers
 
 
+    def sort_scenarios(self, scenarios_to_run):
+        # sort scenarios in slowest to fastest by looking at the last run time if existed
+        if os.path.isfile('.scenarios.csv'):
+            scenario_metas = csv.DictReader(open(".scenarios.csv"))
+            name_duration_dict = dict()
+            for scenario_meta in scenario_metas:
+                name_duration_dict[scenario_meta['name']] = scenario_meta['duration']
+
+            scenario_duration_dict = dict()
+            for scenario in scenarios_to_run:
+                if scenario.name in name_duration_dict:
+                    scenario_duration_dict[scenario] = name_duration_dict[scenario.name]
+                else:
+                    scenario_duration_dict[scenario] = 0
+
+            # now sort them:
+            sorted_tupples = sorted(scenario_duration_dict.items(), key=lambda x: -int(x[1]))
+            scenarios_to_run = [tupple[0] for tupple in sorted_tupples]
+        return scenarios_to_run
+
+    def collate_results(self, results):
+        feature_results = []
+        for feature, scenario_results in itertools.groupby(results, lambda r: r[0].scenario.feature):
+            all_results = []
+            for results in scenario_results:
+                for result in results:
+                    all_results.append(result)
+
+            feature_results.append(FeatureResult(feature, *list(all_results)))
+        return feature_results
 
     def run(self):
         """ Find and load step definitions, and them find and load
         features under `base_path` specified on constructor
         """
+        failed = False
         begin_time = datetime.utcnow()
         try:
             self.loader.find_and_load_step_definitions()
@@ -259,11 +296,28 @@ class ParallelRunner(Runner):
             self.output.print_no_features_found(self.loader.base_dir)
             return
 
-        manager = multiprocessing.Manager()
-        errors = manager.list()
-        results = manager.list()
+        def process_scenarios(scenario_queue,port_number,results,errors,interupted_event):
+            # print "running batch with port number: {}".format(port_number)
+            world.port_number = port_number
 
-        failed = False
+            call_hook('before', 'batch')
+
+            while scenario_queue and not interupted_event.is_set():
+
+                try:
+                    scenario_to_execute = scenario_queue.pop(0)
+                    ignore_case = True
+                    result = scenario_to_execute.run(ignore_case, failfast=self.failfast)
+
+                    results.append(result)
+
+                except Exception as e:
+                    print "Died with %s" % str(e)
+                    traceback.print_exc()
+                    errors.append(e)
+
+            call_hook('after','batch')
+
         scenarios_to_run = []
         try:
 
@@ -275,114 +329,78 @@ class ParallelRunner(Runner):
             sys.stderr.write(e.msg)
             failed = True
 
-
-        # sort scenarios in slowest to fastest by looking at the last run time if existed
-        if os.path.isfile('.scenarios.csv'):
-            scenario_metas = csv.DictReader(open(".scenarios.csv"))
-            name_duration_dict = dict()
-            for scenario_meta in scenario_metas:
-                name_duration_dict[scenario_meta['name']] = scenario_meta['duration']
-
-            scenario_duration_dict = dict()
-            for scenario in scenarios_to_run:
-                if scenario.name in name_duration_dict:
-                    scenario_duration_dict[scenario] = name_duration_dict[scenario.name]
-                else:
-                    scenario_duration_dict[scenario] = 0
-
-            # now sort them:
-            sorted_tupples = sorted(scenario_duration_dict.items(), key=lambda x: -int(x[1]))
-            scenarios_to_run = [tupple[0] for tupple in sorted_tupples]
+        scenarios_to_run = self.sort_scenarios(scenarios_to_run)
 
 
-        scenario_queue = multiprocessing.Queue()
-        for s in scenarios_to_run:
-            scenario_queue.put(s)
-
-
-        call_hook('before', 'all')
-
-        ignore_case = True
-
-        def process_scenarios(scenario_queue,port_number,results,errors):
-            #print "running batch with port number: {}".format(port_number)
-            world.port_number = port_number
-
-            call_hook('before', 'batch')
-
-            while not scenario_queue.empty():
-
-                try:
-                    scenario_to_execute = scenario_queue.get()
-                    result = scenario_to_execute.run(ignore_case, failfast=self.failfast)
-
-                    import pickle
-                    failed = False
-                    try:
-                        pickle.dumps(result)
-                    except Exception as e:
-                        print "Failed: [{}]".format(e)
-                        traceback.print_exc()
-                        failed = True
-
-                    if failed:
-                        print "!!!!! Failed to pickle: {}".format(scenario_to_execute.name)
-
-                    results.append(result)
-
-                except Exception as e:
-                    if not self.failfast:
-                        e = sys.exc_info()[1]
-                        print "Died with %s" % str(e)
-                        traceback.print_exc()
-                        errors.append(e)
-                    else:
-                        print
-                        print ("Lettuce aborted running any more tests "
-                               "because was called with the `--failfast` option")
-
-            call_hook('after','batch')
-
-        # TODO use pool
-        processes = []
-        for i in xrange(self.workers):
-            port_number = 8180 + i
-            process = multiprocessing.Process(target=process_scenarios,args=(scenario_queue,port_number,results,errors))
-            processes.append(process)
-            process.start()
-
+        # Explictly starting a sync manager to remain after keyboard interupt, so we can print out the errors
+        manager = SyncManager()
         try:
-            for process in processes:
-                process.join()
-        except (KeyboardInterrupt, SystemExit):
-            # TODO: This is really not working for me.  Have been using Ctr-\ to break out
-            print "Ctr-C processed shutting down"
-            for process in processes:
-                process.terminate()
-                process.join()
+
+            # shared state
+            def mgr_init():
+                signal.signal(signal.SIGINT, signal.SIG_IGN)
+            manager.start(mgr_init)
+
+            errors = manager.list()
+            results = manager.list()
+            scenario_queue = manager.list()
+            interupted = multiprocessing.Event()
+
+            for s in scenarios_to_run:
+                scenario_queue.append(s)
 
 
-        if len(errors) > 0:
-            print "Exceptions"
-            for error in errors:
-                print error
-        else:
-            print "Test suite had no errors"
+            call_hook('before', 'all')
 
-            feature_results = []
+            processes = []
+            for i in xrange(self.workers):
+                port_number = 8180 + i
+                process = multiprocessing.Process(target=process_scenarios, args=(scenario_queue,port_number,results,errors,interupted))
+                processes.append(process)
+                process.start()
 
-            for feature, scenario_results in itertools.groupby(results, lambda r: r[0].scenario.feature):
-                all_results = []
-                for results in scenario_results:
-                    for result in results:
-                        all_results.append(result)
+            try:
+                for process in processes:
+                    process.join()
+            except KeyboardInterrupt:
+                if not interupted.is_set():
+                    print
+                    print
+                    print("Ctr-C received trying to shutdown gracefully.  Give it a sec, if you have it")
+                    print("If you are really antsy, you can press Ctr-C again")
+                    print
+                    print
+                    interupted.set()
+                    # wait for subprocesses to exit:
+                    for process in processes:
+                        process.join()
+                else:
+                    print
+                    print
+                    print("Okay, Okay -- we will bring it all down now!")
+                    print("You may want to run `pstree -s python` if there is anything dangling and maybe `pkill python`")
+                    print
+                    print
+                    os.system('kill %d' % os.getpid())
 
-                feature_results.append(FeatureResult(feature, *list(all_results)))
+        finally:
+
+            if len(errors) > 0:
+                print "Exceptions"
+                for error in errors:
+                    print error
+            else:
+                print "Test suite had no errors"
+
+            feature_results = self.collate_results(results)
 
             time_elapsed = datetime.utcnow() - begin_time
 
             total = TotalResult(feature_results, time_elapsed)
             total.persist_to_csv()
+
+            # explictly cleaning up manager
+            manager.shutdown()
 
             call_hook('after', 'all', total)
 
@@ -390,5 +408,6 @@ class ParallelRunner(Runner):
                 raise SystemExit(2)
 
             return total
+
 
 

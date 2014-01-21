@@ -38,11 +38,11 @@ if os.name.lower() == 'nt':
     required_modules.append('colorama')
 
 setup(
-    name='lettuce',
-    version='0.2.19',
+    name='plettuce',
+    version='0.0.1',
     description='Behaviour Driven Development for python',
-    author='Gabriel Falcao',
-    author_email='gabriel@nacaolivre.org',
+    author=['Gabriel Falcao','Jonathan Tushman'],
+    author_email=['gabriel@nacaolivre.org','jonathan@zefr.com'],
     url='http://lettuce.it',
     packages=get_packages(),
     install_requires=required_modules,

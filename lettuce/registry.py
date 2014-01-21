@@ -16,7 +16,6 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import os
 import re
-import threading
 import traceback
 
 from lettuce.exceptions import StepLoadingError
