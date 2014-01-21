@@ -38,8 +38,8 @@ if os.name.lower() == 'nt':
     required_modules.append('colorama')
 
 setup(
-    name='plettuce',
-    version='0.0.1',
+    name='lettuce',
+    version='1000.0.1',
     description='Behaviour Driven Development for python',
     author=['Gabriel Falcao','Jonathan Tushman'],
     author_email=['gabriel@nacaolivre.org','jonathan@zefr.com'],
