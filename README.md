@@ -1,3 +1,17 @@
+
+# Parallel Branch
+
+to run in parallel use the `-p <number_of_processes>`
+
+For example:
+
+```bash
+lettuce tests -p 4 -v 2
+```
+
+I recommend that number_of_processes = the number of cores you have on your machine
+
+
 # lettuce
 > Version 0.2.19 - kryptonite
 
