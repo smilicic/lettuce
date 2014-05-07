@@ -731,7 +731,8 @@ class Scenario(object):
                 steps_failed,
                 steps_skipped,
                 steps_undefined,
-                elapsed_time
+                elapsed_time,
+                outline
             )
 
         if self.outlines:
@@ -1228,7 +1229,7 @@ class FeatureResult(object):
 class ScenarioResult(object):
     """Object that holds results of each step ran from within a scenario"""
     def __init__(self, scenario, steps_passed, steps_failed, steps_skipped,
-                 steps_undefined, time_elapsed=None):
+                 steps_undefined, time_elapsed=None, outline=None):
 
         self.scenario = scenario
 
@@ -1237,6 +1238,7 @@ class ScenarioResult(object):
         self.steps_skipped = steps_skipped
         self.steps_undefined = steps_undefined
         self.time_elapsed = time_elapsed
+        self.outline = outline
 
         all_lists = [steps_passed + steps_skipped + steps_undefined + steps_failed]
         self.total_steps = sum(map(len, all_lists))
