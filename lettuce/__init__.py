@@ -25,6 +25,7 @@ import sys
 import signal
 import traceback
 import multiprocessing
+import pickle
 from multiprocessing.managers import SyncManager
 
 from datetime import datetime
@@ -308,8 +309,28 @@ class ParallelRunner(Runner):
                     scenario_to_execute = scenario_queue.pop(0)
                     ignore_case = True
                     result = scenario_to_execute.run(ignore_case, failfast=self.failfast)
-
                     results.append(result)
+
+                except pickle.PicklingError:
+                    print("Pickling Error -- probably due to step functions having the same name.")
+                    print()
+                    if result:
+                        print "    Result: {}".format(result)
+
+                        import StringIO
+                        class MyPickler(pickle.Pickler):
+                            """Custom Picklier to give more detail on whats messing things up
+                            """
+                            def save(self, obj):
+                                print('    pickling object', obj, 'of type', type(obj))
+                                pickle.Pickler.save(self, obj)
+
+                        stringIO = StringIO.StringIO()
+                        pickler = MyPickler(stringIO)
+                        pickler.save(result)
+
+                    else:
+                        print "    No Result"
 
                 except Exception as e:
                     print "Died with %s" % str(e)
