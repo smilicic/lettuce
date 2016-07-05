@@ -43,6 +43,24 @@ class CallbackDict(dict):
                 callback_list[:] = []
 
 class StepDict(dict):
+    def __init__(self, *args, **kwargs):
+        super(StepDict, self).__init__(*args, **kwargs)
+        self._compiled = {}
+        self._compiled_ignore_case = {}
+
+    def get_regex(self, step, ignore_case=False):
+        if ignore_case:
+            regex = self._compiled_ignore_case.get(step, None)
+            if not regex:
+                regex = re.compile(step, re.I)
+                self._compiled_ignore_case[step] = regex
+        else:
+            regex = self._compiled.get(step, None)
+            if not regex:
+                regex = re.compile(step)
+                self._compiled[step] = regex
+        return regex
+
     def load(self, step, func):
         self._assert_is_step(step, func)
         self[step] = func
@@ -71,7 +89,7 @@ class StepDict(dict):
     def _assert_is_step(self, step, func):
         try:
             re.compile(step)
-        except re.error, e:
+        except re.error as e:
             raise StepLoadingError("Error when trying to compile:\n"
                                    "  regex: %r\n"
                                    "  for function: %s\n"
@@ -107,6 +125,10 @@ CALLBACK_REGISTRY = CallbackDict(
             'after_each': [],
             'outline': [],
         },
+        'outline': {
+            'before_each': [],
+            'after_each': [],
+        },
         'background': {
             'before_each': [],
             'after_each': [],
@@ -139,7 +161,7 @@ def call_hook(situation, kind, *args, **kw):
     for callback in CALLBACK_REGISTRY[kind][situation]:
         try:
             callback(*args, **kw)
-        except Exception, e:
+        except Exception as e:
             print "=" * 1000
             traceback.print_exc(e)
             print

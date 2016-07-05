@@ -16,7 +16,10 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from os.path import join, dirname
-from django.utils.importlib import import_module
+try:
+    from importlib import import_module
+except ImportError:
+    from django.utils.importlib import import_module
 from django.conf import settings
 
 
@@ -50,7 +53,17 @@ def _filter_configured_avoids(module):
 
 
 def get_apps():
-    return map(import_module, settings.INSTALLED_APPS)
+    """
+    Import Django apps. It ignores ImportErrors.
+    (Django will take care of it)
+    """
+    apps = []
+    for app in settings.INSTALLED_APPS:
+        try:
+            apps.append(import_module(app))
+        except ImportError:
+            pass
+    return apps
 
 
 def harvest_lettuces(only_the_apps=None, avoid_apps=None, path="features"):

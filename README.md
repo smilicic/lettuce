@@ -13,11 +13,9 @@ I recommend that number_of_processes = the number of cores you have on your mach
 
 
 # lettuce
-> Version 0.2.19 - kryptonite
+> Version 0.2.22 - kryptonite
 
 [![Build Status](https://secure.travis-ci.org/gabrielfalcao/lettuce.png)](http://travis-ci.org/gabrielfalcao/lettuce)
-[![tip for next commit](http://tip4commit.com/projects/132.svg)](http://tip4commit.com/projects/132)
-[![Instanc.es Badge](https://instanc.es/bin/gabrielfalcao/lettuce.png)](https://instanc.es "Instanc.es")
 
 ## On release names
 
@@ -38,6 +36,10 @@ Lettuce is a [BDD](http://en.wikipedia.org/wiki/Behavior_Driven_Development) too
 5. I personally don't like mixing many languages in small projects. Keeping all in python is better.
 6. I love python, and ever did. But I also ever missed something that make writing tests easier and funnier.
 7. I like [nose](https://github.com/nose-devs/nose), which is a unittest pythonic framework. However, as the project I work on grows, so do the tests, and it becomes harder to understand them.
+
+# Documentation
+
+See full documentation on [http://lettuce.it/](http://lettuce.it/)
 
 # Dependencies
 

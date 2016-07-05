@@ -16,6 +16,9 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import os
 import sys
+import django
+from datetime import datetime
+from distutils.version import StrictVersion
 from optparse import make_option
 from django.conf import settings
 from django.core.management import call_command
@@ -23,8 +26,9 @@ from django.core.management.base import BaseCommand
 from django.test.utils import setup_test_environment
 from django.test.utils import teardown_test_environment
 
-from lettuce import Runner
+from lettuce import Runner, ParallelRunner
 from lettuce import registry
+from lettuce.core import SummaryTotalResults
 
 from lettuce.django import harvest_lettuces, get_server
 from lettuce.django.server import LettuceServerException
@@ -35,11 +39,7 @@ class Command(BaseCommand):
     args = '[PATH to feature file or folder]'
     requires_model_validation = False
 
-    option_list = BaseCommand.option_list[1:] + (
-        make_option('-v', '--verbosity', action='store', dest='verbosity', default='4',
-            type='choice', choices=map(str, range(5)),
-            help='Verbosity level; 0=no output, 1=only dots, 2=only scenario names, 3=colorless output, 4=normal output (colorful)'),
-
+    option_list = BaseCommand.option_list + (
         make_option('-a', '--apps', action='store', dest='apps', default='',
             help='Run ONLY the django apps that are listed here. Comma separated'),
 
@@ -49,12 +49,18 @@ class Command(BaseCommand):
         make_option('-S', '--no-server', action='store_true', dest='no_server', default=False,
             help="will not run django's builtin HTTP server"),
 
+        make_option('--nothreading', action='store_false', dest='use_threading', default=True,
+            help='Tells Django to NOT use threading.'),
+
         make_option('-T', '--test-server', action='store_true', dest='test_database',
             default=getattr(settings, "LETTUCE_USE_TEST_DATABASE", False),
             help="will run django's builtin HTTP server using the test databases"),
 
         make_option('-P', '--port', type='int', dest='port',
             help="the port in which the HTTP server will run at"),
+
+        make_option('-p', '--processes', type='int', dest='processes',
+            help="number of processes to run tests", default=1),
 
         make_option('-d', '--debug-mode', action='store_true', dest='debug', default=False,
             help="when put together with builtin HTTP server, forces django to run with settings.DEBUG=True"),
@@ -98,7 +104,31 @@ class Command(BaseCommand):
 
         make_option("--pdb", dest="auto_pdb", default=False,
                     action="store_true", help='Launches an interactive debugger upon error'),
+
     )
+
+    def create_parser(self, prog_name, subcommand):
+        parser = super(Command, self).create_parser(prog_name, subcommand)
+        parser.remove_option('-v')
+        help_text = ('Verbosity level; 0=no output, 1=only dots, 2=only '
+                     'scenario names, 3=normal output, 4=normal output '
+                     '(colorful, deprecated)')
+        parser.add_option('-v', '--verbosity',
+                          action='store',
+                          dest='verbosity',
+                          default='3',
+                          type='choice',
+                          choices=map(str, range(5)),
+                          help=help_text)
+        if StrictVersion(django.get_version()) < StrictVersion('1.7'):
+            # Django 1.7 introduces the --no-color flag. We must add the flag
+            # to be compatible with older django versions
+            parser.add_option('--no-color',
+                              action='store_true',
+                              dest='no_color',
+                              default=False,
+                              help="Don't colorize the command output.")
+        return parser
 
     def stopserver(self, failed=False):
         raise SystemExit(int(failed))
@@ -119,7 +149,8 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         setup_test_environment()
 
-        verbosity = int(options.get('verbosity', 4))
+        verbosity = int(options.get('verbosity', 3))
+        no_color = int(options.get('no_color', False))
         apps_to_run = tuple(options.get('apps', '').split(","))
         apps_to_avoid = tuple(options.get('avoid_apps', '').split(","))
         run_server = not options.get('no_server', False)
@@ -128,7 +159,10 @@ class Command(BaseCommand):
         tags = options.get('tags', None)
         failfast = options.get('failfast', False)
         auto_pdb = options.get('auto_pdb', False)
-
+        threading = options.get('use_threading', True)
+        with_summary = options.get('summary_display', False)
+        processes = int(options.get('processes', 1))
+        
         if test_database:
             migrate_south = getattr(settings, "SOUTH_TESTS_MIGRATE", True)
             try:
@@ -143,19 +177,22 @@ class Command(BaseCommand):
             self._testrunner.setup_test_environment()
             self._old_db_config = self._testrunner.setup_databases()
 
-            call_command('syncdb', verbosity=0, interactive=False,)
-            if migrate_south:
-               call_command('migrate', verbosity=0, interactive=False,)
+            if StrictVersion(django.get_version()) < StrictVersion('1.7'):
+                call_command('syncdb', verbosity=0, interactive=False,)
+                if migrate_south:
+                   call_command('migrate', verbosity=0, interactive=False,)
+            else:
+                call_command('migrate', verbosity=0, interactive=False,)
 
         settings.DEBUG = options.get('debug', False)
 
         paths = self.get_paths(args, apps_to_run, apps_to_avoid)
-        server = get_server(port=options['port'])
+        server = get_server(port=options['port'], threading=threading)
 
         if run_server:
             try:
                 server.start()
-            except LettuceServerException, e:
+            except LettuceServerException as e:
                 raise SystemExit(e)
 
         os.environ['SERVER_NAME'] = str(server.address)
@@ -165,6 +202,7 @@ class Command(BaseCommand):
 
         registry.call_hook('before', 'harvest', locals())
         results = []
+        
         try:
             for path in paths:
                 app_module = None
@@ -173,14 +211,25 @@ class Command(BaseCommand):
 
                 if app_module is not None:
                     registry.call_hook('before_each', 'app', app_module)
-
-                runner = Runner(path, options.get('scenarios'), verbosity,
-                                enable_xunit=options.get('enable_xunit'),
-                                enable_subunit=options.get('enable_subunit'),
-                                xunit_filename=options.get('xunit_file'),
-                                subunit_filename=options.get('subunit_file'),
-                                tags=tags, failfast=failfast, auto_pdb=auto_pdb,
-                                smtp_queue=smtp_queue)
+                
+                if processes > 1:
+                    runner = ParallelRunner(path, options.get('scenarios'),
+                                            verbosity, no_color,
+                                            enable_xunit=options.get('enable_xunit'),
+                                            enable_subunit=options.get('enable_subunit'),
+                                            xunit_filename=options.get('xunit_file'),
+                                            subunit_filename=options.get('subunit_file'),
+                                            failfast=failfast, auto_pdb=auto_pdb,
+                                            tags=tags, workers=processes)
+                else:
+                    runner = Runner(path, options.get('scenarios'),
+                                    verbosity, no_color,
+                                    enable_xunit=options.get('enable_xunit'),
+                                    enable_subunit=options.get('enable_subunit'),
+                                    xunit_filename=options.get('xunit_file'),
+                                    subunit_filename=options.get('subunit_file'),
+                                    tags=tags, failfast=failfast, auto_pdb=auto_pdb,
+                                    smtp_queue=smtp_queue)
 
                 result = runner.run()
                 if app_module is not None:
@@ -189,10 +238,12 @@ class Command(BaseCommand):
                 results.append(result)
                 if not result or result.steps != result.steps_passed:
                     failed = True
-        except SystemExit, e:
+            
+            
+        except SystemExit as e:
             failed = e.code
 
-        except Exception, e:
+        except Exception as e:
             failed = True
             import traceback
             traceback.print_exc(e)

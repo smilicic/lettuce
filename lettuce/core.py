@@ -43,7 +43,7 @@ class REP(object):
     "RegEx Pattern"
     first_of = re.compile(ur'^first_of_')
     last_of = re.compile(ur'^last_of_')
-    language = re.compile(u"language:[ ]*([^\s]+)")
+    language = re.compile(u"\s*#\s*language:[ ]*([^\s]+)")
     within_double_quotes = re.compile(r'("[^"]+")')
     within_single_quotes = re.compile(r"('[^']+')")
     only_whitespace = re.compile('^\s*$')
@@ -145,7 +145,7 @@ class StepDefinition(object):
         try:
             ret = self.function(self.step, *args, **kw)
             self.step.passed = True
-        except Exception, e:
+        except Exception as e:
             self.step.failed = True
             self.step.why = ReasonToFail(self.step, e)
             raise
@@ -221,15 +221,18 @@ class Step(object):
     scenario = None
     background = None
     display = True
+    columns = None
+    matrix = None
 
     def __init__(self, sentence, remaining_lines, line=None, filename=None):
         self.sentence = sentence
         self.original_sentence = sentence
         self._remaining_lines = remaining_lines
-        keys, hashes, self.multiline = self._parse_remaining_lines(remaining_lines)
-
+        keys, hashes, self.multiline, columns, nukeys = self._parse_remaining_lines(remaining_lines)
         self.keys = tuple(keys)
+        self.non_unique_keys = nukeys
         self.hashes = HashList(self, hashes)
+        self.columns = columns
         self.described_at = StepDescription(line, filename)
         self.proposed_method_name, self.proposed_sentence = self.propose_definition()
 
@@ -262,6 +265,7 @@ class Step(object):
 
     def solve_and_clone(self, data, display_step):
         sentence = self.sentence
+        multiline = self.multiline
         hashes = self.hashes[:]  # deep copy
         for k, v in data.items():
 
@@ -275,10 +279,12 @@ class Step(object):
                 return new_row
 
             sentence = evaluate(sentence)
+            multiline = evaluate(multiline)
             hashes = map(evaluate_hash_value, hashes)
 
         new = deepcopy(self)
         new.sentence = sentence
+        new.multiline = multiline
         new.hashes = hashes
         new.display = display_step
         return new
@@ -334,19 +340,28 @@ class Step(object):
         lines = strings.dicts_to_string(self.hashes, self.keys).splitlines()
         return u"\n".join([(u" " * self.table_indentation) + line for line in lines]) + "\n"
 
-    def __repr__(self):
+    def represent_columns(self):
+        lines = strings.json_to_string(self.columns, self.non_unique_keys).splitlines()
+        return u"\n".join([(u" " * self.table_indentation) + line for line in lines]) + "\n"
+
+    def __unicode__(self):
         return u'<Step: "%s">' % self.sentence
+
+    def __repr__(self):
+        return unicode(self).encode('utf-8')
 
     def _parse_remaining_lines(self, lines):
         multiline = strings.parse_multiline(lines)
         keys, hashes = strings.parse_hashes(lines)
-        return keys, hashes, multiline
+        non_unique_keys, columns = strings.parse_as_json(lines)
+        return keys, hashes, multiline, columns, non_unique_keys
+
 
     def _get_match(self, ignore_case):
         matched, func = None, lambda: None
-
-        for regex, func in STEP_REGISTRY.items():
-            matched = re.search(regex, self.sentence, ignore_case and re.I or 0)
+        for step, func in STEP_REGISTRY.items():
+            regex = STEP_REGISTRY.get_regex(step, ignore_case)
+            matched = regex.search(self.sentence)
             if matched:
                 break
 
@@ -466,10 +481,10 @@ class Step(object):
                     step.run(ignore_case)
                     steps_passed.append(step)
 
-            except NoDefinitionFound, e:
+            except NoDefinitionFound as e:
                 steps_undefined.append(e.step)
 
-            except Exception, e:
+            except Exception as e:
                 steps_failed.append(step)
                 reasons_to_fail.append(step.why)
                 if failfast:
@@ -624,8 +639,11 @@ class Scenario(object):
     def _calc_value_length(self, data):
         return self._calc_list_length(data.values())
 
-    def __repr__(self):
+    def __unicode__(self):
         return u'<Scenario: "%s">' % self.name
+
+    def __repr__(self):
+        return unicode(self).encode('utf-8')
 
     def matches_tags(self, tags):
         if tags is None:
@@ -705,13 +723,18 @@ class Scenario(object):
         def run_scenario(almost_self, order=-1, outline=None, run_callbacks=False):
             call_hook('before_each', 'scenario', self)
             scenario_begin_time = datetime.utcnow()
+            reasons_to_fail = []
             try:
+                if outline:
+                    self._report_outline_hook(outline, True)
                 if self.background:
                     self.background.run(ignore_case)
 
-                reasons_to_fail = []
                 all_steps, steps_passed, steps_failed, steps_undefined = Step.run_all(self.steps, outline, run_callbacks, ignore_case, failfast=failfast, display_steps=(order < 1), reasons_to_fail=reasons_to_fail)
             except:
+                if outline:
+                    # Can't use "finally" here since we need to call it before after_each_scenario
+                    self._report_outline_hook(outline, False)
                 call_hook('after_each', 'scenario', self)
                 raise
             finally:
@@ -719,6 +742,8 @@ class Scenario(object):
                 if outline:
                     call_hook('outline', 'scenario', self, order, outline,
                             reasons_to_fail)
+            if outline:
+                self._report_outline_hook(outline, False)
 
             skip = lambda x: x not in steps_passed and x not in steps_undefined and x not in steps_failed
             steps_skipped = filter(skip, all_steps)
@@ -749,6 +774,17 @@ class Scenario(object):
 
         for step in self.solved_steps:
             step.scenario = self
+
+    def _report_outline_hook(self, outline, started):
+        """
+        Function called before each outline and after each outline to provide hooks
+        :param outline: dict with examples row
+        :type outline dict
+        :param started: is outline started or finished
+        :type started bool
+        """
+        call_hook('before_each' if started else 'after_each', 'outline', self, outline)
+
 
     def _resolve_steps(self, steps, outlines, with_file, original_string):
         for outline_idx, outline in enumerate(outlines):
@@ -874,7 +910,7 @@ class Background(object):
             call_hook('before_each', 'step', step)
             try:
                 results.append(step.run(ignore_case))
-            except Exception, e:
+            except Exception as e:
                 print e
                 pass
 
@@ -1002,8 +1038,11 @@ class Feature(object):
         found = regex.findall(item)
         return found
 
-    def __repr__(self):
+    def __unicode__(self):
         return u'<%s: "%s">' % (self.language.first_of_feature, self.name)
+
+    def __repr__(self):
+        return unicode(self).encode('utf-8')
 
     def get_head(self):
         return u"%s: %s" % (self.language.first_of_feature, self.name)
@@ -1033,7 +1072,7 @@ class Feature(object):
         if not language:
             language = Language()
 
-        found = len(re.findall(r'(?:%s):[ ]*\w+' % language.feature, "\n".join(lines), re.U))
+        found = len(re.findall(r'^[ \t]*(?:%s):[ ]*\w+' % language.feature, "\n".join(lines), re.U + re.M))
 
         if found > 1:
             raise LettuceSyntaxError(with_file,
@@ -1044,7 +1083,7 @@ class Feature(object):
                 'Features must have a name. e.g: "Feature: This is my name"')
 
         while lines:
-            matched = re.search(r'(?:%s):(.*)' % language.feature, lines[0], re.I)
+            matched = re.search(r'^[ \t]*(?:%s):(.*)' % language.feature, lines[0], re.I)
             if matched:
                 name = matched.groups()[0].strip()
                 break
@@ -1242,7 +1281,7 @@ class ScenarioResult(object):
 
         all_lists = [steps_passed + steps_skipped + steps_undefined + steps_failed]
         self.total_steps = sum(map(len, all_lists))
-
+        
     @property
     def passed(self):
         return self.total_steps is len(self.steps_passed)
@@ -1261,6 +1300,9 @@ class TotalResult(object):
         # store the scenario names that failed, with their location
         self.failed_scenario_locations = []
         self.time_elapsed = time_elapsed
+
+
+    def output_format(self):
         for feature_result in self.feature_results:
             for scenario_result in feature_result.scenario_results:
 
@@ -1314,3 +1356,47 @@ class TotalResult(object):
 
 
 
+class SummaryTotalResults(TotalResult):
+
+    def __init__(self, total_results):
+        """Aggregates results per total results into a summary
+        @params: list of total result objects
+
+        """
+        super(SummaryTotalResults, self).__init__()
+        self.total_results = total_results
+        self.features_ran_overall = 0
+        self.features_passed_overall = 0
+
+
+    def __len__(self):
+        """ Overloaded len() to be able to use with tests
+
+        """
+        return len(self.total_results)
+
+    def __getitem__(self, item):
+        """ Needed for tests.
+
+        """
+        return self.total_results[item]
+
+    def summarize_all(self):
+        """Outputs the aggregated results for the TotalResult list
+
+        """
+        for partial_result in filter(None, self.total_results):
+            self.features_ran_overall += len(partial_result.feature_results)
+            self.features_passed_overall += len([feat for feat in partial_result.feature_results if feat.passed])
+            self.feature_results = partial_result.feature_results
+            for feature_result in self.feature_results:
+                for scenario_result in feature_result.scenario_results:
+                    self.scenario_results.append(scenario_result)
+                    self.steps_passed += len(scenario_result.steps_passed)
+                    self.steps_failed += len(scenario_result.steps_failed)
+                    self.steps_skipped += len(scenario_result.steps_skipped)
+                    self.steps_undefined += len(scenario_result.steps_undefined)
+                    self.steps += scenario_result.total_steps
+                    self._proposed_definitions.extend(scenario_result.steps_undefined)
+                    if len(scenario_result.steps_failed) > 0:
+                        self.failed_scenario_locations.append(scenario_result.scenario.represented())

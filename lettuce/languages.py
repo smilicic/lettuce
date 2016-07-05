@@ -99,13 +99,13 @@ LANGUAGES = {
     },
     'ja': {
         'examples': u'例',
-        'feature': u'フィーチャ',
+        'feature': u'フィーチャ|機能',
         'name': u'Japanese',
         'native': u'日本語',
         'scenario': u'シナリオ',
         'scenario_outline': u'シナリオアウトライン|シナリオテンプレート|テンプレ|シナリオテンプレ',
         'scenario_separator': u'(シナリオ|シナリオアウトライン|シナリオテンプレート|テンプレ|シナリオテンプレ)',
-        'background': u'(?:Background)',
+        'background': u'背景',
     },
     'tr': {
         'examples': u'Örnekler',
@@ -145,7 +145,7 @@ LANGUAGES = {
         'scenario': u'Сценарий',
         'scenario_outline': u'Структура сценария',
         'scenario_separator': u'(Структура сценария|Сценарий)',
-        'background': u'(?:Background)',
+        'background': u'(?:Background|Предыстория)',
     },
     'uk': {
         'examples': u'Приклади|Сценарії',

@@ -1,5 +1,6 @@
 import sys
 
+
 class Reporter(object):
     def __init__(self):
         self.failed_scenarios = []
@@ -27,7 +28,7 @@ class Reporter(object):
             self.wrt("\n")
             for scenario in self.failed_scenarios:
                 reason = self.scenarios_and_its_fails[scenario]
-                self.wrt(str(reason.step))
+                self.wrt(unicode(reason.step))
                 self.wrt("\n")
                 self.wrt(reason.traceback)
 
@@ -57,3 +58,10 @@ class Reporter(object):
             total.steps,
             word,
             ", ".join(steps_details)))
+
+        if total.failed_scenario_locations:
+            self.wrt("\n")
+            self.wrt("List of failed scenarios:\n")
+            for scenario in total.failed_scenario_locations:
+                self.wrt(scenario)
+            self.wrt("\n")

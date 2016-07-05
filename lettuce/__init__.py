@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-__version__ = version = '0.2.19'
+__version__ = version = '0.2.22'
 
 release = 'kryptonite'
 
@@ -30,6 +30,8 @@ from multiprocessing.managers import SyncManager
 
 from datetime import datetime
 
+import warnings
+
 try:
     from imp import reload
 except ImportError:
@@ -39,7 +41,7 @@ except ImportError:
 import random
 import itertools
 
-from lettuce.core import Feature, TotalResult, FeatureResult
+from lettuce.core import Feature, TotalResult, FeatureResult, ScenarioResult
 
 from lettuce.terrain import after
 from lettuce.terrain import before
@@ -86,7 +88,7 @@ __all__ = [
 try:
     terrain = fs.FileSystem._import("terrain")
     reload(terrain)
-except Exception, e:
+except Exception as e:
     if not "No module named terrain" in str(e):
         string = 'Lettuce has tried to load the conventional environment ' \
             'module "terrain"\nbut it has errors, check its contents and ' \
@@ -103,24 +105,24 @@ class Runner(object):
     Takes a base path as parameter (string), so that it can look for
     features and step definitions on there.
     """
-    def __init__(self, base_path, scenarios=None, verbosity=0, random=False,
+    def __init__(self, base_path, scenarios=None,
+                 verbosity=0, no_color=False, random=False,
                  enable_xunit=False, xunit_filename=None,
                  enable_subunit=False, subunit_filename=None,
                  tags=None, failfast=False, auto_pdb=False,
-                 smtp_queue=None):
+                 smtp_queue=None, root_dir=None):
 
         """ lettuce.Runner will try to find a terrain.py file and
         import it from within `base_path`
         """
         self.tags = tags
         self.single_feature = None
-
         if os.path.isfile(base_path) and os.path.exists(base_path):
             self.single_feature = base_path
             base_path = os.path.dirname(base_path)
 
         sys.path.insert(0, base_path)
-        self.loader = fs.FeatureLoader(base_path)
+        self.loader = fs.FeatureLoader(base_path, root_dir)
         self.verbosity = verbosity
         self.scenarios = scenarios and map(int, scenarios.split(",")) or None
         self.failfast = failfast
@@ -135,10 +137,17 @@ class Runner(object):
             from lettuce.plugins import dots as output
         elif verbosity is 2:
             from lettuce.plugins import scenario_names as output
-        elif verbosity is 3:
-            from lettuce.plugins import shell_output as output
         else:
-            from lettuce.plugins import colored_shell_output as output
+            if verbosity is 4:
+                from lettuce.plugins import colored_shell_output as output
+                msg = ('Deprecated in lettuce 2.2.21. Use verbosity 3 without '
+                       '--no-color flag instead of verbosity 4')
+                warnings.warn(msg, DeprecationWarning)
+            elif verbosity is 3:
+                if no_color:
+                    from lettuce.plugins import shell_output as output
+                else:
+                    from lettuce.plugins import colored_shell_output as output
 
         self.random = random
 
@@ -158,12 +167,6 @@ class Runner(object):
         """ Find and load step definitions, and them find and load
         features under `base_path` specified on constructor
         """
-        try:
-            self.loader.find_and_load_step_definitions()
-        except StepLoadingError, e:
-            print "Error loading step definitions:\n", e
-            return
-
         results = []
         if self.single_feature:
             features_files = [self.single_feature]
@@ -177,6 +180,16 @@ class Runner(object):
             return
 
         world.port_number = 8181
+        
+    # only load steps if we've located some features.
+        # this prevents stupid bugs when loading django modules
+        # that we don't even want to test.
+        try:
+            self.loader.find_and_load_step_definitions()
+        except StepLoadingError as e:
+            print "Error loading step definitions:\n", e
+            return
+
         call_hook('before', 'all')
         call_hook('before', 'batch')
         begin_time = datetime.utcnow()
@@ -192,7 +205,10 @@ class Runner(object):
                                 random=self.random,
                                 failfast=self.failfast))
 
-        except exceptions.LettuceSyntaxError, e:
+        except exceptions.LettuceSyntaxError as e:
+            sys.stderr.write(e.msg)
+            failed = True
+        except exceptions.NoDefinitionFound, e:
             sys.stderr.write(e.msg)
             failed = True
         except:
@@ -211,6 +227,7 @@ class Runner(object):
             total_time = datetime.utcnow() - begin_time
             total = TotalResult(results, total_time)
             call_hook('after', 'batch')
+            total.output_format()
             call_hook('after', 'all', total)
 
             if failed:
@@ -243,35 +260,52 @@ class ParallelRunner(Runner):
         self.workers = workers
 
 
-    def sort_scenarios(self, scenarios_to_run):
-        # sort scenarios in slowest to fastest by looking at the last run time if existed
-        if os.path.isfile('.scenarios.csv'):
-            scenario_metas = csv.DictReader(open(".scenarios.csv"))
-            name_duration_dict = dict()
-            for scenario_meta in scenario_metas:
-                name_duration_dict[scenario_meta['name']] = scenario_meta['duration']
+    # def sort_scenarios(self, scenarios_to_run):
+        # # sort scenarios in slowest to fastest by looking at the last run time if existed
+        # if os.path.isfile('.scenarios.csv'):
+            # scenario_metas = csv.DictReader(open(".scenarios.csv"))
+            # name_duration_dict = dict()
+            # for scenario_meta in scenario_metas:
+                # name_duration_dict[scenario_meta['name']] = scenario_meta['duration']
 
-            scenario_duration_dict = dict()
-            for scenario in scenarios_to_run:
-                if scenario.name in name_duration_dict:
-                    scenario_duration_dict[scenario] = name_duration_dict[scenario.name]
-                else:
-                    scenario_duration_dict[scenario] = 0
+            # scenario_duration_dict = dict()
+            # for scenario in scenarios_to_run:
+                # if scenario.name in name_duration_dict:
+                    # scenario_duration_dict[scenario] = name_duration_dict[scenario.name]
+                # else:
+                    # scenario_duration_dict[scenario] = 0
 
-            # now sort them:
-            sorted_tupples = sorted(scenario_duration_dict.items(), key=lambda x: -int(x[1]))
-            scenarios_to_run = [tupple[0] for tupple in sorted_tupples]
-        return scenarios_to_run
+            # # now sort them:
+            # sorted_tupples = sorted(scenario_duration_dict.items(), key=lambda x: -int(x[1]))
+            # scenarios_to_run = [tupple[0] for tupple in sorted_tupples]
+        # return scenarios_to_run
 
     def collate_results(self, results):
         feature_results = []
+        curr_feature = None
+        all_results = []
         for feature, scenario_results in itertools.groupby(results, lambda r: r[0].scenario.feature):
-            all_results = []
+            if not curr_feature:
+                curr_feature = feature
+                all_results = []
+            elif feature.name != curr_feature.name:
+                feature_results.append(FeatureResult(curr_feature, *list(all_results)))
+                curr_feature = feature
+                all_results = []
+            
             for results in scenario_results:
                 for result in results:
+                    scenario_result = ScenarioResult(
+                        result.scenario,
+                        result.steps_passed, 
+                        result.steps_failed, 
+                        result.steps_skipped,
+                        result.steps_undefined, 
+                        result.time_elapsed, 
+                        result.outline
+                    )
                     all_results.append(result)
-
-            feature_results.append(FeatureResult(feature, *list(all_results)))
+        feature_results.append(FeatureResult(curr_feature, *list(all_results)))
         return feature_results
 
     def run(self):
@@ -350,7 +384,7 @@ class ParallelRunner(Runner):
             sys.stderr.write(e.msg)
             failed = True
 
-        scenarios_to_run = self.sort_scenarios(scenarios_to_run)
+        #scenarios_to_run = self.sort_scenarios(scenarios_to_run)
 
 
         # Explictly starting a sync manager to remain after keyboard interupt, so we can print out the errors
